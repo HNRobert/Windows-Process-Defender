@@ -23,13 +23,15 @@ WPD_ICON = 'C:/ProgramData/Windows Process Defender/icon.ico'
 
 def has_wpd_process():
     hwnd = FindWindow(None, "Windows Process Defender")
-    if hwnd:
+    if hwnd and not is_startup():
         try:
             ShowWindow(hwnd, 5)
             return True
         except Exception as e:
             print(e)
             return False
+    elif hwnd:  # Is running, but on startup, then don't show its window
+        return True
     return False
 
 
@@ -89,7 +91,10 @@ def scan_process(pids_dict: dict):
         try:
             if c_pid in [0, 4]:
                 continue
-            pids_dict[c_pid] = Process(c_pid).exe()
+            c_exe = Process(c_pid).exe()
+            if c_exe == "C:\\Windows\\System32\\consent.exe":
+                return pids_dict
+            pids_dict[c_pid] = c_exe
         except Exception as e:
             print(e)
 
@@ -102,9 +107,11 @@ def scan_process(pids_dict: dict):
         del pids_dict[r_pid]
 
     for target in features.keys():
-        if os.path.normpath(target) not in pids_dict.values() and features[target]:
+        if os.path.normpath(target) not in pids_dict.values() and features[target][0]:
+            cmd = [os.path.basename(target)]
+            cmd.extend([param for param in features[target][1].split() if param])
             try:
-                Popen([os.path.basename(target)], cwd=os.path.dirname(target), shell=True,
+                Popen(cmd, cwd=os.path.dirname(target), shell=True,
                       creationflags=CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
             except Exception as e:
                 print(f"Error starting process {target}: {e}")
@@ -119,29 +126,29 @@ def mk_ui(hide_root):
         global features
         features = {}
         for _t in targets_boolvar_dict.keys():
-            features[_t] = targets_boolvar_dict[_t].get()
+            features[_t] = [targets_boolvar_dict[_t].get(), targets_arg_dict[_t].get()]
         write_features(features)
         save_btn.config(text="Success!")
         root.after(1000, lambda: save_btn.config(text="Save & Apply"))
 
     def add_lines(new_items_dict: dict):
         # add new columns into the list, and then place the targets in order
-        for _index, _target in enumerate(new_items_dict.keys()):
-            targets_boolvar_dict[_target] = tk.BooleanVar(value=new_items_dict[_target])
+        for _target in new_items_dict.keys():
+            targets_boolvar_dict[_target] = tk.BooleanVar(value=new_items_dict[_target][0])
             targets_chkbutton_dict[_target] = ttk.Checkbutton(
                 target_frame, text=_target, variable=targets_boolvar_dict[_target])
+            targets_arg_dict[_target] = ttk.Entry(target_frame)
+            targets_arg_dict[_target].insert(0, new_items_dict[_target][1])
             targets_remove_button_dict[_target] = ttk.Button(
                 target_frame, text='Remove', command=lambda _tar=_target: remove_line(_tar))
+        rearrange_lines()
+
+    def rearrange_lines():
         for _index, _target in enumerate(targets_chkbutton_dict.keys()):
             targets_chkbutton_dict[_target].grid(
-                row=_index, column=0, columnspan=1, padx=5, pady=2, sticky='NSEW')
-            targets_remove_button_dict[_target].grid(row=_index, column=1, padx=2, pady=2, sticky='NSEW')
-
-        add_targets_button.grid(row=1 + len(targets_chkbutton_dict), column=0, columnspan=3, padx=10, ipadx=5,
-                                pady=5, sticky='NSEW')
-        close_btn.grid(row=2 + len(targets_chkbutton_dict), column=0, padx=10, ipadx=5, pady=5, sticky='NSEW')
-        save_btn.grid(row=2 + len(targets_chkbutton_dict), column=1, columnspan=2, padx=10, ipadx=25, pady=5,
-                      sticky='NSEW')
+                row=_index + 1, column=0, padx=5, pady=2, sticky='NSEW')
+            targets_arg_dict[_target].grid(row=_index + 1, column=1, padx=5, pady=2, sticky='NSEW')
+            targets_remove_button_dict[_target].grid(row=_index + 1, column=2, padx=4, pady=2, sticky='NSEW')
         resize_root()
 
     def remove_line(_target):
@@ -150,14 +157,16 @@ def mk_ui(hide_root):
             # Delete the line and reset the button state
             targets_chkbutton_dict[_target].destroy()
             targets_remove_button_dict[_target].destroy()
+            targets_arg_dict[_target].destroy()
             rm_button_state_dict.pop(_target, None)
             if _target in rm_button_timer_dict:
                 root.after_cancel(rm_button_timer_dict[_target])
                 rm_button_timer_dict.pop(_target)
             targets_remove_button_dict.pop(_target, None)
             targets_chkbutton_dict.pop(_target, None)
+            targets_arg_dict.pop(_target, None)
             targets_boolvar_dict.pop(_target, None)
-            resize_root()
+            rearrange_lines()
         else:
             # Set the button to "Sure?" state
             targets_remove_button_dict[_target].config(text="Sure?")
@@ -199,12 +208,18 @@ def mk_ui(hide_root):
         add_lines(processed_exe_names(files_path))
 
     def resize_root():
-        root.rowconfigure(1, weight=1, minsize=31 * int(bool(len(targets_chkbutton_dict))) - 5)
-        root.minsize(width=600, height=140)
-        root.geometry(f"{root.winfo_width()}x{min(31 * len(targets_chkbutton_dict) + 125, 800)}")
+        current_line_count = len(targets_chkbutton_dict)
+        root.rowconfigure(1, weight=1, minsize=31 * int(bool(current_line_count)) - 5)
+        root.minsize(width=800, height=140)
+        root.geometry(
+            f"{root.winfo_width()}x{min(max(24 * current_line_count + 190, root.winfo_height()), 600)}")
+        for t_col in range(4):
+            tar_col_list[t_col].grid_configure(rowspan=current_line_count + 1)
+        for f_col in range(3):
+            tar_final_row_sep[f_col].grid_configure(row=current_line_count + 1)
 
     def resize_canvas(event):
-        # 更新 canvas 的滚动区域以匹配内容的实际尺寸
+        # Update canvas' scroll region to match the actual size
         canvas_width = event.width
         target_canvas.itemconfig(canvas_window, width=canvas_width)
         target_canvas.config(scrollregion=target_canvas.bbox("all"))
@@ -229,9 +244,11 @@ def mk_ui(hide_root):
     root.iconbitmap(WPD_ICON)
     root.protocol('WM_DELETE_WINDOW', root.withdraw)
     root.geometry("600x100")
+    """
     root.attributes('-topmost', True)
     root.attributes('-topmost', False)
     root.update_idletasks()
+    """
     tkfont = tk_font.nametofont("TkDefaultFont")
     tkfont.config(family='Microsoft YaHei UI')
     root.option_add("*Font", tkfont)
@@ -268,9 +285,33 @@ def mk_ui(hide_root):
     canvas_window = target_canvas.create_window((0, 0), window=target_frame, anchor='nw')
     target_canvas.bind("<Configure>", resize_canvas)
 
+    tar_col_list = []
+    tar_final_row_sep = []
+    for col in range(4):
+        tar_col_list.append(ttk.Separator(target_frame, orient="vertical"))
+        tar_col_list[-1].grid(row=0, rowspan=1, column=col, sticky='NSEW')
+    for col in range(6):
+        tar_first_row_sep = ttk.Separator(target_frame, orient='horizontal')
+        tar_first_row_sep.grid(row=col // 3, column=col % 3, padx=1, sticky='NSEW')
+    for col in range(3):
+        tar_final_row_sep.append(ttk.Separator(target_frame, orient="horizontal"))
+        tar_final_row_sep[-1].grid(row=0, column=col, padx=1, sticky='NSEW')
+
+    targets_name_label = ttk.Label(target_frame, text="Executable files' path")
+    targets_name_label.grid(row=0, column=0, pady=5)
+    targets_arg_label = ttk.Label(target_frame, text="Args")
+    targets_arg_label.grid(row=0, column=1, pady=5)
+    targets_del_label = ttk.Label(target_frame, text="Remove")
+    targets_del_label.grid(row=0, column=2, pady=5)
+
     add_targets_button = ttk.Button(root, text='+ Add targets', command=add_targets)
+    add_targets_button.grid(row=2, column=0, columnspan=3, padx=10, ipadx=5,
+                            pady=5, sticky='NSEW')
     close_btn = ttk.Button(root, text='Exit', command=exit_program)
+    close_btn.grid(row=3, column=0, padx=10, ipadx=5, pady=5, sticky='NSEW')
     save_btn = ttk.Button(root, text='Save & Apply', command=save_data)
+    save_btn.grid(row=3, column=1, columnspan=2, padx=10, ipadx=25, pady=5,
+                  sticky='NSEW')
     root.bind_all('<Return>', lambda event: save_data())
     root.bind_all('<Control-s>', lambda event: save_data())
     root.grid_columnconfigure(1, weight=1, minsize=200)
