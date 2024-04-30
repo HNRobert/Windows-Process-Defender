@@ -2,12 +2,13 @@ import json
 import os
 import sys
 import time
+import tkinter as tk
 import tkinter.filedialog as tk_filedialog
 import tkinter.font as tk_font
 from base64 import b64decode
 from subprocess import Popen, PIPE, CREATE_NO_WINDOW, DETACHED_PROCESS, CREATE_NEW_PROCESS_GROUP
 from threading import Thread
-from tkinter import Tk, ttk, BooleanVar, Menu
+from tkinter import Tk, ttk
 
 from psutil import pids, Process
 from win32com.client import Dispatch
@@ -38,12 +39,18 @@ def is_startup():
     return False
 
 
-def turn_schedule(state: bool, result_var: BooleanVar):
-    add_scd_cmd = f'schtasks /create /tn WPDStartup /tr "{sys.argv[0]} --startup_visit" /sc ONLOGON /rl highest /f'
+def turn_schedule(state: bool, result_var: tk.BooleanVar):
+    add_scd_cmd = f'schtasks /create /tn WPDStartup /tr "\\"{sys.argv[0]}\\" \\"--startup_visit\\"" /sc ONLOGON /rl highest /f'
     del_sch_cmd = f'schtasks /delete /tn WPDStartup /f'
     cmd = add_scd_cmd if state else del_sch_cmd
-    p = Popen(cmd, stdin=PIPE, creationflags=CREATE_NO_WINDOW)
-    p.communicate(input=b'y\n')
+    p = Popen(cmd, stdin=PIPE, stdout=PIPE, stderr=PIPE, creationflags=CREATE_NO_WINDOW)
+    stdout, stderr = p.communicate()
+    if p.returncode == 0:
+        print("Success:")
+        print(stdout.decode())
+    else:
+        print("Error:")
+        print(stderr.decode())
     result_var.set(get_startup_state())
 
 
@@ -111,8 +118,8 @@ def mk_ui(hide_root):
     def save_data():
         global features
         features = {}
-        for _t in targets_booleanvar_dict.keys():
-            features[_t] = targets_booleanvar_dict[_t].get()
+        for _t in targets_boolvar_dict.keys():
+            features[_t] = targets_boolvar_dict[_t].get()
         write_features(features)
         save_btn.config(text="Success!")
         root.after(1000, lambda: save_btn.config(text="Save & Apply"))
@@ -120,31 +127,53 @@ def mk_ui(hide_root):
     def add_lines(new_items_dict: dict):
         # add new columns into the list, and then place the targets in order
         for _index, _target in enumerate(new_items_dict.keys()):
-            targets_booleanvar_dict[_target] = BooleanVar()
-            targets_booleanvar_dict[_target].set(new_items_dict[_target])
-            targets_checkbutton_dict[_target] = ttk.Checkbutton(
-                target_frame, text=_target, variable=targets_booleanvar_dict[_target])
+            targets_boolvar_dict[_target] = tk.BooleanVar(value=new_items_dict[_target])
+            targets_chkbutton_dict[_target] = ttk.Checkbutton(
+                target_frame, text=_target, variable=targets_boolvar_dict[_target])
             targets_remove_button_dict[_target] = ttk.Button(
                 target_frame, text='Remove', command=lambda _tar=_target: remove_line(_tar))
-        for _index, _target in enumerate(targets_checkbutton_dict.keys()):
-            targets_checkbutton_dict[_target].grid(
-                row=_index, column=0, columnspan=2, padx=5, pady=2, sticky='NSEW')
-            targets_remove_button_dict[_target].grid(row=_index, column=2, padx=2, pady=2, sticky='NSEW')
+        for _index, _target in enumerate(targets_chkbutton_dict.keys()):
+            targets_chkbutton_dict[_target].grid(
+                row=_index, column=0, columnspan=1, padx=5, pady=2, sticky='NSEW')
+            targets_remove_button_dict[_target].grid(row=_index, column=1, padx=2, pady=2, sticky='NSEW')
 
-        add_targets_button.grid(row=1 + len(targets_checkbutton_dict), column=0, columnspan=3, padx=10, ipadx=5,
+        add_targets_button.grid(row=1 + len(targets_chkbutton_dict), column=0, columnspan=3, padx=10, ipadx=5,
                                 pady=5, sticky='NSEW')
-        close_btn.grid(row=2 + len(targets_checkbutton_dict), column=0, padx=10, ipadx=5, pady=5, sticky='NSEW')
-        save_btn.grid(row=2 + len(targets_checkbutton_dict), column=1, columnspan=2, padx=10, ipadx=25, pady=5,
+        close_btn.grid(row=2 + len(targets_chkbutton_dict), column=0, padx=10, ipadx=5, pady=5, sticky='NSEW')
+        save_btn.grid(row=2 + len(targets_chkbutton_dict), column=1, columnspan=2, padx=10, ipadx=25, pady=5,
                       sticky='NSEW')
         resize_root()
 
     def remove_line(_target):
-        targets_checkbutton_dict[_target].destroy()
-        targets_remove_button_dict[_target].destroy()
-        targets_remove_button_dict.pop(_target)
-        targets_checkbutton_dict.pop(_target)
-        targets_booleanvar_dict.pop(_target)
-        resize_root()
+        # Check if the button is in the "Sure?" state, if yes, delete the line and reset the button state
+        if rm_button_state_dict.get(_target, False):
+            # Delete the line and reset the button state
+            targets_chkbutton_dict[_target].destroy()
+            targets_remove_button_dict[_target].destroy()
+            rm_button_state_dict.pop(_target, None)
+            if _target in rm_button_timer_dict:
+                root.after_cancel(rm_button_timer_dict[_target])
+                rm_button_timer_dict.pop(_target)
+            targets_remove_button_dict.pop(_target, None)
+            targets_chkbutton_dict.pop(_target, None)
+            targets_boolvar_dict.pop(_target, None)
+            resize_root()
+        else:
+            # Set the button to "Sure?" state
+            targets_remove_button_dict[_target].config(text="Sure?")
+            rm_button_state_dict[_target] = True
+
+            # Set a timer, if no more action in 3 sec then reset
+            if _target in rm_button_timer_dict:
+                root.after_cancel(rm_button_timer_dict[_target])
+
+            rm_button_timer_dict[_target] = root.after(3000, reset_button, _target)
+
+    def reset_button(_target):
+        if _target in targets_remove_button_dict:
+            targets_remove_button_dict[_target].config(text="Remove")
+            rm_button_state_dict[_target] = False
+            rm_button_timer_dict.pop(_target, None)
 
     def resolved_shortcut(lnk_path):
         # To tell if the target of the shortcut is a .exe file. If yes, return the target path, else return None.
@@ -160,7 +189,7 @@ def mk_ui(hide_root):
         for filename in filenames:
             if (filename.lower().endswith('.exe') or
                 filename.lower().endswith('.lnk') and (filename := resolved_shortcut(filename))) \
-                    and filename not in targets_checkbutton_dict.keys():
+                    and filename not in targets_chkbutton_dict.keys():
                 processed_files[filename] = True
         return processed_files
 
@@ -170,9 +199,22 @@ def mk_ui(hide_root):
         add_lines(processed_exe_names(files_path))
 
     def resize_root():
-        root.rowconfigure(1, weight=1, minsize=31 * int(bool(len(targets_checkbutton_dict))) - 5)
-        root.minsize(width=600, height=31 * len(targets_checkbutton_dict) + 105)
-        root.geometry(f"600x{31 * len(targets_checkbutton_dict) + 105}")
+        root.rowconfigure(1, weight=1, minsize=31 * int(bool(len(targets_chkbutton_dict))) - 5)
+        root.minsize(width=600, height=140)
+        root.geometry(f"{root.winfo_width()}x{min(31 * len(targets_chkbutton_dict) + 125, 800)}")
+
+    def resize_canvas(event):
+        # 更新 canvas 的滚动区域以匹配内容的实际尺寸
+        canvas_width = event.width
+        target_canvas.itemconfig(canvas_window, width=canvas_width)
+        target_canvas.config(scrollregion=target_canvas.bbox("all"))
+
+    def processwheel(event):
+        a = int(-event.delta)
+        if a > 0:
+            target_canvas.yview_scroll(1, tk.UNITS)
+        else:
+            target_canvas.yview_scroll(-1, tk.UNITS)
 
     def exit_program():
         global continue_defending
@@ -186,19 +228,45 @@ def mk_ui(hide_root):
     root.title('Windows Process Defender')
     root.iconbitmap(WPD_ICON)
     root.protocol('WM_DELETE_WINDOW', root.withdraw)
+    root.geometry("600x100")
+    root.attributes('-topmost', True)
+    root.attributes('-topmost', False)
+    root.update_idletasks()
     tkfont = tk_font.nametofont("TkDefaultFont")
     tkfont.config(family='Microsoft YaHei UI')
     root.option_add("*Font", tkfont)
 
-    targets_booleanvar_dict = {}
-    targets_checkbutton_dict = {}
+    targets_boolvar_dict = {}
+    targets_chkbutton_dict = {}
+    targets_arg_dict = {}
     targets_remove_button_dict = {}
+
+    rm_button_state_dict = {}
+    rm_button_timer_dict = {}
 
     target_notice_label = ttk.Label(root, text='Targets:')
     target_notice_label.grid(row=0, column=0, padx=10, pady=5, sticky='NSEW')
-    target_frame = ttk.Frame(root)
-    target_frame.grid(row=1, column=0, columnspan=2, padx=8, sticky='NSEW')
+
+    target_label_frame = tk.LabelFrame(root, relief=tk.GROOVE)
+    target_label_frame.grid(row=1, column=0, padx=11, columnspan=2, sticky='NSEW')
+    target_label_frame.bind_all("<MouseWheel>", processwheel)
+    target_label_frame.columnconfigure(0, weight=1, minsize=200)
+    target_label_frame.rowconfigure(0, weight=1)
+
+    target_canvas = tk.Canvas(target_label_frame)
+    target_canvas.config(highlightthickness=0)
+    target_canvas.grid(row=0, column=0, columnspan=1, sticky="NSEW")
+
+    target_frame = ttk.Frame(target_canvas)
     target_frame.columnconfigure(0, weight=1, minsize=200)
+
+    target_canvas_scrollbar = ttk.Scrollbar(target_label_frame, orient=tk.VERTICAL)
+    target_canvas_scrollbar.grid(row=0, column=1, sticky="NSEW")
+    target_canvas_scrollbar.config(command=target_canvas.yview)
+
+    target_canvas.config(yscrollcommand=target_canvas_scrollbar.set)
+    canvas_window = target_canvas.create_window((0, 0), window=target_frame, anchor='nw')
+    target_canvas.bind("<Configure>", resize_canvas)
 
     add_targets_button = ttk.Button(root, text='+ Add targets', command=add_targets)
     close_btn = ttk.Button(root, text='Exit', command=exit_program)
@@ -209,9 +277,9 @@ def mk_ui(hide_root):
 
     add_lines(features)
 
-    main_menu = Menu(root)
-    option_menu = Menu(main_menu, tearoff=False)
-    is_startup_set = BooleanVar(value=get_startup_state())
+    main_menu = tk.Menu(root)
+    option_menu = tk.Menu(main_menu, tearoff=False)
+    is_startup_set = tk.BooleanVar(value=get_startup_state())
     option_menu.add_checkbutton(label="Start when any user logs in", variable=is_startup_set,
                                 command=lambda: Thread(turn_schedule(is_startup_set.get(), is_startup_set)).start())
     main_menu.add_cascade(label="Options", menu=option_menu)
