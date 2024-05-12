@@ -6,7 +6,7 @@ import tkinter as tk
 import tkinter.filedialog as tk_filedialog
 import tkinter.font as tk_font
 from base64 import b64decode
-from subprocess import Popen, PIPE, CREATE_NO_WINDOW, DETACHED_PROCESS, CREATE_NEW_PROCESS_GROUP
+from subprocess import Popen, PIPE, CREATE_NO_WINDOW
 from threading import Thread
 from tkinter import Tk, ttk
 
@@ -42,9 +42,9 @@ def is_startup():
 
 
 def turn_schedule(state: bool, result_var: tk.BooleanVar):
-    add_scd_cmd = f'schtasks /create /tn WPDStartup /tr "\\"{sys.argv[0]}\\" \\"--startup_visit\\"" /sc ONLOGON /rl highest /f'
-    del_sch_cmd = f'schtasks /delete /tn WPDStartup /f'
-    cmd = add_scd_cmd if state else del_sch_cmd
+    set_startup_cmd = f'schtasks /create /tn WPDStartup /tr "\\"{sys.argv[0]}\\" \\"--startup_visit\\"" /sc ONLOGON /rl highest /f'
+    rm_startup_cmd = f'schtasks /delete /tn WPDStartup /f'
+    cmd = set_startup_cmd if state else rm_startup_cmd
     p = Popen(cmd, stdin=PIPE, stdout=PIPE, stderr=PIPE, creationflags=CREATE_NO_WINDOW)
     stdout, stderr = p.communicate()
     if p.returncode == 0:
@@ -108,11 +108,20 @@ def scan_process(pids_dict: dict):
 
     for target in features.keys():
         if os.path.normpath(target) not in pids_dict.values() and features[target][0]:
-            cmd = [os.path.basename(target)]
-            cmd.extend([param for param in features[target][1].split() if param])
+            args_cmd = ''.join([f' \\"{param}\\"' for param in features[target][1].split() if param])
+            add_scd_cmd = f'schtasks /create /tn WPDRun /tr "\\"{os.path.normpath(target)}\\"{args_cmd}" /sc ONLOGON /rl highest /f'
+            run_scd_cmd = f'schtasks /run /tn WPDRun'
+            del_sch_cmd = f'schtasks /delete /tn WPDRun /f'
             try:
-                Popen(cmd, cwd=os.path.dirname(target), shell=True,
-                      creationflags=CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
+                for cmd in [add_scd_cmd, run_scd_cmd, del_sch_cmd]:
+                    p = Popen(cmd, stdin=PIPE, stdout=PIPE, stderr=PIPE, creationflags=CREATE_NO_WINDOW)
+                    stdout, stderr = p.communicate()
+                    if p.returncode == 0:
+                        print("Success:")
+                        print(stdout.decode())
+                    else:
+                        print("Error:")
+                        print(stderr.decode())
             except Exception as e:
                 print(f"Error starting process {target}: {e}")
 
@@ -199,7 +208,7 @@ def mk_ui(hide_root):
             if (filename.lower().endswith('.exe') or
                 filename.lower().endswith('.lnk') and (filename := resolved_shortcut(filename))) \
                     and filename not in targets_chkbutton_dict.keys():
-                processed_files[filename] = True
+                processed_files[filename] = [True, ""]
         return processed_files
 
     def add_targets():
