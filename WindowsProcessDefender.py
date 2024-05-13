@@ -22,7 +22,7 @@ WPD_ICON = 'C:/ProgramData/Windows Process Defender/icon.ico'
 
 
 def has_wpd_process():
-    hwnd = FindWindow(None, "Windows Process Defender")
+    hwnd = FindWindow(None, "Windows Process Defender Settings")
     if hwnd and not is_startup():
         try:
             ShowWindow(hwnd, 5)
@@ -63,12 +63,12 @@ def get_startup_state():
 
 def write_features(data: dict):
     wpd_data['features'] = data
-    with open(WPD_DATA, 'w') as file:
+    with open(WPD_DATA, 'w', encoding='utf-8') as file:
         json.dump(wpd_data, file, indent=4)
 
 
 def read_json(filename):
-    with open(filename, 'r') as file:
+    with open(filename, 'r', encoding='utf-8') as file:
         return json.load(file)
 
 
@@ -118,10 +118,10 @@ def scan_process(pids_dict: dict):
                     stdout, stderr = p.communicate()
                     if p.returncode == 0:
                         print("Success:")
-                        print(stdout.decode())
+                        print(stdout.decode(errors='replace'))
                     else:
                         print("Error:")
-                        print(stderr.decode())
+                        print(stderr.decode(errors='replace'))
             except Exception as e:
                 print(f"Error starting process {target}: {e}")
 
@@ -249,7 +249,7 @@ def mk_ui(hide_root):
     root = Tk()
     if hide_root:
         root.withdraw()
-    root.title('Windows Process Defender')
+    root.title('Windows Process Defender Settings')
     root.iconbitmap(WPD_ICON)
     root.protocol('WM_DELETE_WINDOW', root.withdraw)
     root.geometry("600x100")
@@ -346,7 +346,7 @@ def main():
         os.makedirs(WPD_DATA_PATH)
     if not os.path.isfile(WPD_DATA):
         with open(WPD_DATA, 'w') as f:
-            json.dump({}, f, indent=4)
+            json.dump({}, f, indent=4, encoding='utf-8')
     if not os.path.isfile(WPD_ICON):
         with open(WPD_ICON, "wb") as f:
             f.write(b64decode(nmico_data))
