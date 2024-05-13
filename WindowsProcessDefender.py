@@ -63,12 +63,12 @@ def get_startup_state():
 
 def write_features(data: dict):
     wpd_data['features'] = data
-    with open(WPD_DATA, 'w', encoding='utf-8') as file:
+    with open(WPD_DATA, 'w') as file:
         json.dump(wpd_data, file, indent=4)
 
 
 def read_json(filename):
-    with open(filename, 'r', encoding='utf-8') as file:
+    with open(filename, 'r') as file:
         return json.load(file)
 
 
@@ -346,7 +346,7 @@ def main():
         os.makedirs(WPD_DATA_PATH)
     if not os.path.isfile(WPD_DATA):
         with open(WPD_DATA, 'w') as f:
-            json.dump({}, f, indent=4, encoding='utf-8')
+            json.dump({}, f, indent=4)
     if not os.path.isfile(WPD_ICON):
         with open(WPD_ICON, "wb") as f:
             f.write(b64decode(nmico_data))
